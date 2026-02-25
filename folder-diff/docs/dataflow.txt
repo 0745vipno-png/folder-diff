@@ -1,0 +1,141 @@
+資料流（Data Flow）逐步
+
+1) 入口：User → run.bat
+
+給兩個輸入快照路徑
+
+指定輸出資料夾
+
+指定比對模式（mtime/size/hash）
+
+範例（之後 CLI 會長這樣）：
+
+run.bat --a ".\outA\snapshot_*.json" --b ".\outB\snapshot_*.json" --out ".\diff_out" --mode smart
+2) Preflight：路徑、格式、版本相容性
+
+diff.py 先做：
+
+檔案存在
+
+JSON 可解析
+
+snapshot header schema 正確
+
+tool version（可記錄，但不強依賴）
+
+entries 是否已排序（不要求，但會自建 index）
+
+3) Integrity Verifier（可選，但我建議預設開啟）
+
+「不可竄改」精神落地：
+
+若使用者提供 manifest_A.json / manifest_B.json
+→ 先驗證 snapshot 的 SHA256 是否吻合
+
+不吻合：
+
+strict 模式：直接退出（exit=1）
+
+audit 模式：繼續比對，但報告標記 integrity=FAILED（exit=2）
+
+這可以做成參數：--integrity strict|audit|off
+我建議預設 audit（不阻斷，但一定留證據）。
+
+4) Snapshot Reader → Normalizer
+
+讀入兩份快照，只取比對所需欄位，並規格化：
+
+rel_path（統一 /）
+
+kind
+
+size
+
+mtime_epoch
+
+sha256（若快照有 hash）
+
+5) Index Builder（資料結構核心）
+
+用 rel_path 建索引：
+
+dict[str, Entry]
+
+這一步讓 diff 成 O(n)。
+
+6) Diff Engine（差異分類）
+
+輸出差異類型（核心 data model）：
+
+A) Added
+
+B 有、A 沒有
+
+B) Removed
+
+A 有、B 沒有
+
+C) Modified
+
+A/B 都有，但關鍵欄位不同
+（依 mode 決定比什麼）
+
+D) Type Changed
+
+同一路徑但 file/dir 變了（通常是大事）
+
+E) Metadata Changed
+
+只變 mtime，但 size/hash 不變（可選）
+
+7) Summary Builder
+
+產生一份高階摘要：
+
+added_count
+
+removed_count
+
+modified_count
+
+type_changed_count
+
+total_changed
+
+integrity_status (A/B)
+
+8) Output Writer（落地）
+
+輸出：
+
+diff_out/
+ ├─ diff_<run_id>.json
+ ├─ diff_<run_id>.csv
+ ├─ audit_<run_id>.log
+ └─ manifest_<run_id>.json
+
+manifest 一樣對輸出檔做 SHA-256，保證「結果可驗證」。
+
+Diff Report（資料模型草案）
+不支援圖表。
+diff.json 頂層結構（概念）
+
+header
+
+integrity
+
+summary
+
+records[]
+
+records 每筆：
+
+type
+
+rel_path
+
+a (optional)
+
+b (optional)
+
+changed_fields (for MODIFIED)
